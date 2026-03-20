@@ -1,18 +1,62 @@
-import { fastify } from 'fastify';
+// api/server.ts
+import 'dotenv/config'; // Carrega o .env automaticamente
+import Fastify from 'fastify';
+import fastifyWebsocket from '@fastify/websocket';
+import { connectDB } from './db/database';
+
+const app = Fastify({ logger: true });
+let activeWsClients = 0;
+
+// Registra o plugin de WebSocket
+app.register(fastifyWebsocket);
+
+// Rota de teste simples para o chat
+app.register(async function chatRoutes(fastify) {
+  fastify.get('/terminal', { websocket: true }, (socket) => {
+    fastify.log.info('Cliente conectado no terminal.');
+    activeWsClients += 1;
+
+    socket.on('close', () => {
+      activeWsClients = Math.max(0, activeWsClients - 1);
+    });
+
+    socket.on('message', (message: Buffer) => {
+      socket.send(JSON.stringify({
+        system: true,
+        text: `Echo: ${message.toString()}`
+      }));
+    });
+  });
+
+  fastify.get('/health', async () => {
+    return {
+      status: 'ok',
+      websocket: {
+        route: '/terminal',
+        registered: fastify.hasRoute({ method: 'GET', url: '/terminal' }),
+        activeClients: activeWsClients,
+      },
+    };
+  });
+
+});
 
 
-const server = fastify();
+// Função principal de inicialização
+const start = async () => {
+  try {
+    // 1. Conecta ao banco de dados PRIMEIRO
+    await connectDB();
 
-// change host to local host
-server.listen({ port: 8080, host: '127.0.0.1' }, (err, address) => { if (err) {
-    console.error(err);
+    // 2. Inicia o servidor Fastify DEPOIS
+    const port = Number(process.env.PORT) || 3000;
+    await app.listen({ port });
+    console.log(`🚀 Terminal Server rodando em ws://localhost:${port}/terminal`);
+    
+  } catch (err) {
+    app.log.error(err);
     process.exit(1);
   }
-  console.log(`Server is running at ${address}`);
-});
+};
 
-server.get('/hello', async (request, reply) => {
-  return { message: 'Hello, World!' };
-});
-
-export default server;
+start();
